@@ -2,8 +2,6 @@
 
 Live NASCAR race status plugin for [ChuckBuilds/LEDMatrix](https://github.com/ChuckBuilds/LEDMatrix).
 
-Author: Crazzybrad/BRSStore
-
 It uses NASCAR's public, unauthenticated timing data to show:
 
 - Cup Series, NASCAR O'Reilly Auto Parts Series, and Craftsman Truck Series
