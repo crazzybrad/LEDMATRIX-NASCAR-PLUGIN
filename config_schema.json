@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NASCAR Race Leaderboard",
+  "description": "Configure live NASCAR race and leaderboard display.",
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable or disable the NASCAR race display."
+    },
+    "show_cup_series": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show NASCAR Cup Series sessions."
+    },
+    "show_oreilly_series": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show NASCAR O'Reilly Auto Parts Series sessions."
+    },
+    "show_truck_series": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show NASCAR Craftsman Truck Series sessions."
+    },
+    "display_mode": {
+      "type": "string",
+      "enum": ["auto", "favorite", "leaderboard"],
+      "default": "auto",
+      "description": "Auto shows the favorite driver when configured, otherwise the leaderboard."
+    },
+    "favorite_cup_driver": {
+      "type": "string",
+      "default": "",
+      "maxLength": 80,
+      "description": "Favorite Cup Series driver. Match by car number, NASCAR driver id, or part of the driver's name."
+    },
+    "favorite_oreilly_driver": {
+      "type": "string",
+      "default": "",
+      "maxLength": 80,
+      "description": "Favorite O'Reilly Auto Parts Series driver. Match by car number, NASCAR driver id, or part of the driver's name."
+    },
+    "favorite_truck_driver": {
+      "type": "string",
+      "default": "",
+      "maxLength": 80,
+      "description": "Favorite Craftsman Truck Series driver. Match by truck number, NASCAR driver id, or part of the driver's name."
+    },
+    "leaderboard_limit": {
+      "type": "integer",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Number of leaderboard positions to rotate through."
+    },
+    "show_lap_info": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show current lap and total laps when available."
+    },
+    "show_delta": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show each driver's gap to the leader when NASCAR provides it."
+    },
+    "live_priority": {
+      "type": "boolean",
+      "default": true,
+      "description": "Let live NASCAR sessions temporarily take priority in the display rotation."
+    },
+    "live_update_interval": {
+      "type": "integer",
+      "default": 15,
+      "minimum": 5,
+      "maximum": 120,
+      "description": "Update interval in seconds while a selected NASCAR session is live."
+    },
+    "idle_update_interval": {
+      "type": "integer",
+      "default": 300,
+      "minimum": 60,
+      "maximum": 3600,
+      "description": "Update interval in seconds when no selected NASCAR session is live."
+    },
+    "schedule_cache_seconds": {
+      "type": "integer",
+      "default": 1800,
+      "minimum": 300,
+      "maximum": 21600,
+      "description": "How long to cache NASCAR season schedules, in seconds."
+    },
+    "live_feed_url": {
+      "type": "string",
+      "default": "https://cf.nascar.com/live/feeds/live-feed.json",
+      "description": "NASCAR live feed URL."
+    },
+    "event_logo_url_template": {
+      "type": "string",
+      "default": "",
+      "maxLength": 500,
+      "description": "Optional event logo URL template. Supports {race_id}, {series_id}, and {year}; leave blank to use a logo URL from the schedule or a generated event badge."
+    },
+    "primary_color": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 255},
+      "minItems": 3,
+      "maxItems": 3,
+      "default": [255, 255, 255],
+      "description": "Primary text color as RGB."
+    },
+    "accent_color": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 255},
+      "minItems": 3,
+      "maxItems": 3,
+      "default": [255, 215, 0],
+      "description": "Accent text color as RGB."
+    },
+    "muted_color": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 255},
+      "minItems": 3,
+      "maxItems": 3,
+      "default": [110, 110, 110],
+      "description": "Muted text color as RGB."
+    }
+  },
+  "required": ["enabled"]
+}

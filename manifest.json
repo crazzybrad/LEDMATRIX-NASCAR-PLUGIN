@@ -1,0 +1,40 @@
+{
+  "id": "ledmatrix-nascar",
+  "name": "NASCAR Race Leaderboard",
+  "version": "0.2.2",
+  "description": "Shows live NASCAR lap status, favorite driver position, and leaderboard pages for Cup, O'Reilly, and Truck Series races.",
+  "author": "Crazzybrad/BRSStore",
+  "entry_point": "manager.py",
+  "class_name": "NascarPlugin",
+  "category": "sports",
+  "tags": ["nascar", "racing", "motorsports", "live"],
+  "icon": "fas fa-flag-checkered",
+  "config_schema": "config_schema.json",
+  "display_modes": ["nascar"],
+  "update_interval": 300,
+  "default_duration": 12,
+  "min_ledmatrix_version": "3.4.0",
+  "compatible_versions": [">=3.4.0"],
+  "display": {
+    "design_size": {
+      "width": 128,
+      "height": 32
+    }
+  },
+  "api_requirements": [
+    {
+      "name": "NASCAR public live feed",
+      "required": true,
+      "description": "Unauthenticated NASCAR live timing feed used for race status and running order.",
+      "url": "https://cf.nascar.com/live/feeds/live-feed.json",
+      "rate_limit": "Configurable; defaults to 15 seconds while a selected series is live."
+    },
+    {
+      "name": "NASCAR public schedule feed",
+      "required": false,
+      "description": "Unauthenticated season schedule used when there is no active live leaderboard.",
+      "url": "https://cf.nascar.com/cacher/{year}/race_list_basic.json",
+      "rate_limit": "Configurable; defaults to 30 minutes."
+    }
+  ]
+}
