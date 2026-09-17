@@ -16,7 +16,7 @@ It uses NASCAR's public, unauthenticated timing data to show:
 
 ## Install
 
-From the LEDMatrix web interface, open **Plugins**, then install from a custom GitHub URL once this folder is published as its own repo.
+From the LEDMatrix web interface, open **Plugins**, then install from a custom GitHub URL
 
 For local development against an LEDMatrix checkout:
 
