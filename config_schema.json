@@ -33,20 +33,20 @@
     "favorite_cup_driver": {
       "type": "string",
       "default": "",
-      "maxLength": 80,
-      "description": "Favorite Cup Series driver. Match by car number, NASCAR driver id, or part of the driver's name."
+      "maxLength": 200,
+      "description": "Favorite Cup drivers. Separate multiple drivers with commas. Enter car numbers (example: 5, 12), names, NASCAR driver ids, or combined labels (example: 5 - K. Larson, 12 - R. Blaney)."
     },
     "favorite_oreilly_driver": {
       "type": "string",
       "default": "",
-      "maxLength": 80,
-      "description": "Favorite O'Reilly Auto Parts Series driver. Match by car number, NASCAR driver id, or part of the driver's name."
+      "maxLength": 200,
+      "description": "Favorite O'Reilly drivers. Separate multiple drivers with commas. Example: 2, 21 or 2 - J. Love, 21 - A. Hill. Names and NASCAR driver ids also work."
     },
     "favorite_truck_driver": {
       "type": "string",
       "default": "",
-      "maxLength": 80,
-      "description": "Favorite Craftsman Truck Series driver. Match by truck number, NASCAR driver id, or part of the driver's name."
+      "maxLength": 200,
+      "description": "Favorite Truck Series drivers. Separate multiple drivers with commas. Enter truck numbers, names, NASCAR driver ids, or combined labels (example: 7 - Driver Name, 19 - Driver Name)."
     },
     "leaderboard_limit": {
       "type": "integer",

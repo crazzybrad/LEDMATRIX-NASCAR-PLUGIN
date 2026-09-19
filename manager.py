@@ -12,6 +12,7 @@ import json
 import base64
 import hashlib
 import io
+import re
 import time
 import urllib.error
 import urllib.request
@@ -41,6 +42,8 @@ class DriverRow:
 class NascarPlugin(BasePlugin):
     """Render live NASCAR lap and leaderboard data on the LED matrix."""
 
+    FINAL_WINNER_SECONDS = 15.0
+
     SERIES = {
         "cup": {
             "id": 1,
@@ -66,6 +69,14 @@ class NascarPlugin(BasePlugin):
     }
 
     ACTIVE_FLAGS = {1, 2, 3, 6, 8}
+    FLAG_COLORS = {
+        1: (0, 220, 60),
+        2: (255, 220, 0),
+        3: (235, 35, 35),
+        4: (255, 255, 255),
+        6: (255, 220, 0),
+        8: (230, 230, 230),
+    }
     FLAG_LABELS = {
         1: "GREEN",
         2: "YELLOW",
@@ -91,6 +102,13 @@ class NascarPlugin(BasePlugin):
         self.last_update_ts: Optional[float] = None
         self._leaderboard_index = 0
         self._leaderboard_seen = 0
+        self._favorite_index = 0
+        self._favorite_seen = 0
+        self._field_index = 0
+        self._field_seen = 0
+        self._final_race_key: Optional[str] = None
+        self._final_started_at: Optional[float] = None
+        self._final_favorite_index = 0
         self._icon_memory: Dict[str, Any] = {}
 
     def validate_config(self) -> bool:
@@ -120,7 +138,7 @@ class NascarPlugin(BasePlugin):
                     self.live_feed = cached
                 self.logger.warning("NASCAR live feed update failed: %s", exc)
 
-        if not self._is_selected_live_feed(self.live_feed):
+        if not self.has_live_content():
             self._refresh_schedules()
 
         self.last_update_ts = time.time()
@@ -136,6 +154,8 @@ class NascarPlugin(BasePlugin):
 
         if self._is_selected_live_feed(self.live_feed):
             self._draw_live_feed()
+        elif self._is_selected_final_feed(self.live_feed):
+            self._draw_final_feed()
         else:
             self._draw_idle()
 
@@ -143,7 +163,7 @@ class NascarPlugin(BasePlugin):
         return True
 
     def has_live_content(self) -> bool:
-        return self._is_selected_live_feed(self.live_feed)
+        return self._is_selected_live_feed(self.live_feed) or self._is_selected_final_feed(self.live_feed)
 
     def get_live_modes(self) -> List[str]:
         return ["nascar"]
@@ -157,22 +177,57 @@ class NascarPlugin(BasePlugin):
         return float(self.config.get("display_duration", 12))
 
     def supports_dynamic_duration(self) -> bool:
-        return self._use_leaderboard_mode() and self.has_live_content()
+        if not self.has_live_content():
+            return False
+        if self._is_selected_final_feed(self.live_feed):
+            return True
+        if self._use_leaderboard_mode():
+            return True
+        favorites = self._favorite_rows()
+        return not favorites or len(favorites) > 1 or bool(self._favorite_field_rows(favorites))
 
     def reset_cycle_state(self) -> None:
         self._leaderboard_index = 0
         self._leaderboard_seen = 0
+        self._favorite_index = 0
+        self._favorite_seen = 0
+        self._field_index = 0
+        self._field_seen = 0
 
     def is_cycle_complete(self) -> bool:
+        if self._is_selected_final_feed(self.live_feed):
+            self._sync_final_state()
+            if self._final_started_at is None:
+                return False
+            favorite_seconds = max(1.0, self.get_display_duration())
+            return time.monotonic() - self._final_started_at >= self.FINAL_WINNER_SECONDS + favorite_seconds
+        if self._use_favorite_mode():
+            favorites = self._favorite_rows()
+            if favorites:
+                field_count = len(self._favorite_field_rows(favorites))
+                favorites_complete = len(favorites) <= 1 or self._favorite_seen >= len(favorites)
+                field_complete = field_count == 0 or self._field_seen >= field_count
+                return favorites_complete and field_complete
         rows = self._leaderboard_rows()
         limit = min(len(rows), int(self.config.get("leaderboard_limit", 5)))
         return limit <= 1 or self._leaderboard_seen >= limit
+
+    def get_cycle_duration(self, display_mode: Optional[str] = None) -> Optional[float]:
+        del display_mode
+        if self._is_selected_final_feed(self.live_feed):
+            return self.FINAL_WINNER_SECONDS + max(1.0, self.get_display_duration())
+        return None
 
     def on_config_change(self, new_config: Dict[str, Any]) -> None:
         self.config = new_config
         self.enabled = new_config.get("enabled", True)
         self._leaderboard_index = 0
         self._leaderboard_seen = 0
+        self._favorite_index = 0
+        self._favorite_seen = 0
+        self._field_index = 0
+        self._field_seen = 0
+        self._final_favorite_index = 0
 
     def get_info(self) -> Dict[str, Any]:
         return {
@@ -189,43 +244,136 @@ class NascarPlugin(BasePlugin):
         width = int(getattr(self.display_manager.matrix, "width", 128))
         height = int(getattr(self.display_manager.matrix, "height", 32))
         primary = self._rgb("primary_color", (255, 255, 255))
-        accent = self._rgb("accent_color", (255, 215, 0))
         muted = self._rgb("muted_color", (110, 110, 110))
 
         header = self._header_text()
-        self._draw_flag_icon(0, 0)
-        self._draw_line(header, 0, accent, width, x=10)
+        self._draw_flag_header(header, 0, self._flag_color(), width)
 
         if self._use_favorite_mode():
-            favorite = self._favorite_row()
-            if favorite:
-                self._draw_favorite(favorite, width, height, primary, accent, muted)
+            favorites = self._favorite_rows()
+            if favorites:
+                index = self._favorite_index % len(favorites)
+                self._draw_favorite(favorites[index], favorites, width, height, primary, muted)
+                self._favorite_index = (index + 1) % len(favorites)
+                self._favorite_seen += 1
             else:
-                self._draw_line("FAV NOT FOUND", self._row_y(1, height), primary, width, x=10)
+                self._draw_line("FAV NOT FOUND", self._row_y(1, height), primary, width)
                 self._draw_leaderboard_page(width, height, primary, muted, start_y=self._row_y(2, height))
         else:
             self._draw_leaderboard_page(width, height, primary, muted, start_y=self._row_y(1, height))
 
+    def _draw_final_feed(self) -> None:
+        self._sync_final_state()
+        width = int(getattr(self.display_manager.matrix, "width", 128))
+        height = int(getattr(self.display_manager.matrix, "height", 32))
+        primary = self._rgb("primary_color", (255, 255, 255))
+        muted = self._rgb("muted_color", (110, 110, 110))
+        series = self._series_label(self.live_feed.get("series_id"))
+        self._draw_flag_header(f"{series} FINAL", 0, self._flag_color(), width)
+
+        elapsed = time.monotonic() - (self._final_started_at or time.monotonic())
+        if elapsed < self.FINAL_WINNER_SECONDS:
+            rows = self._leaderboard_rows()
+            winner = next((row for row in rows if row.position == 1), rows[0] if rows else None)
+            if winner:
+                self._draw_winner_row(winner, self._row_y(1, height), primary, width)
+                self._draw_line("WINNER", self._row_y(2, height), muted, width)
+            else:
+                self._draw_line("WINNER PENDING", self._row_y(1, height), primary, width)
+            return
+
+        favorites = self._favorite_rows()
+        if not favorites:
+            self._draw_line("NO FAVORITES", self._row_y(1, height), primary, width)
+            return
+
+        max_rows = 2 if height <= 32 else 4
+        page_start = self._final_favorite_index % len(favorites)
+        page = favorites[page_start:page_start + max_rows]
+        if len(page) < min(max_rows, len(favorites)):
+            page.extend(favorites[: min(max_rows, len(favorites)) - len(page)])
+        for offset, row in enumerate(page):
+            color = primary if offset == 0 else muted
+            self._draw_driver_row(row, self._row_y(offset + 1, height), color, width, include_delta=False)
+        self._final_favorite_index = (page_start + len(page)) % len(favorites)
+
+    def _draw_winner_row(
+        self,
+        row: DriverRow,
+        y: int,
+        color: Tuple[int, int, int],
+        width: int,
+    ) -> None:
+        """Draw a centered car-number badge followed by the winning driver."""
+        name = self._short_name(row.name)
+        icon = self._number_icon(row)
+        icon_width = int(getattr(icon, "width", 0))
+        gap = 2 if icon_width else 0
+        fitted_name = self._fit_text(name, max(1, width - icon_width - gap))
+        text_width = self._text_width(fitted_name)
+        start_x = max(0, (width - icon_width - gap - text_width) // 2)
+        self._paste_icon(icon, start_x, y)
+        self.display_manager.draw_text(
+            fitted_name,
+            x=start_x + icon_width + gap,
+            y=max(0, int(y)),
+            color=color,
+            small_font=True,
+        )
+
     def _draw_favorite(
         self,
         row: DriverRow,
+        favorites: List[DriverRow],
         width: int,
         height: int,
         primary: Tuple[int, int, int],
-        accent: Tuple[int, int, int],
         muted: Tuple[int, int, int],
     ) -> None:
-        name = self._short_name(row.name)
-        number_width = self._draw_number_icon(row, 0, self._row_y(1, height))
-        self._draw_line(f"P{row.position} {name}", self._row_y(1, height), primary, width, x=number_width + 2)
-        detail = f"P{row.position}"
-        if self.config.get("show_delta", True) and row.delta not in (None, 0):
-            detail = f"{detail} +{row.delta:.1f}"
-        if row.laps_completed is not None:
-            detail = f"{detail} L{row.laps_completed}"
-        self._draw_line(detail, self._row_y(2, height), accent, width, x=10)
-        if height >= 64:
-            self._draw_line(self._flag_label(), self._row_y(3, height), muted, width, x=10)
+        self._draw_driver_row(row, self._row_y(1, height), primary, width, include_delta=False)
+        self._draw_field_ticker(favorites, self._row_y(2, height), muted, width)
+
+    @staticmethod
+    def _driver_identity(row: DriverRow) -> str:
+        return row.driver_id or f"{row.number}:{row.name}"
+
+    def _favorite_field_rows(self, favorites: List[DriverRow]) -> List[DriverRow]:
+        favorite_ids = {self._driver_identity(row) for row in favorites}
+        return [row for row in self._leaderboard_rows() if self._driver_identity(row) not in favorite_ids]
+
+    def _draw_field_ticker(
+        self,
+        favorites: List[DriverRow],
+        y: int,
+        color: Tuple[int, int, int],
+        width: int,
+    ) -> None:
+        rows = self._favorite_field_rows(favorites)
+        if not rows:
+            self._draw_line("NO OTHER CARS", y, color, width)
+            return
+
+        start = self._field_index % len(rows)
+        page = rows[start:]
+        items: List[str] = []
+        used_width = 0
+        separator = "  "
+        separator_width = self._text_width(separator)
+        for candidate in page:
+            item = f"P{candidate.position} #{candidate.number}"
+            item_width = self._text_width(item)
+            added_width = item_width + (separator_width if items else 0)
+            if items and used_width + added_width > width:
+                break
+            items.append(item)
+            used_width += added_width
+
+        if not items:
+            items = [f"P{rows[start].position} #{rows[start].number}"]
+        advance = len(items)
+        self._field_index = (start + advance) % len(rows)
+        self._field_seen += advance
+        self._draw_line(separator.join(items), y, color, width)
 
     def _draw_leaderboard_page(
         self,
@@ -250,13 +398,8 @@ class NascarPlugin(BasePlugin):
 
         for offset, row in enumerate(page):
             y = start_y + offset * self._row_spacing(height)
-            name = self._short_name(row.name)
-            line = f"P{row.position} {name}"
-            if self.config.get("show_delta", True) and row.delta not in (None, 0) and width >= 96:
-                line = f"{line} +{row.delta:.1f}"
             color = primary if offset == 0 else muted
-            number_width = self._draw_number_icon(row, 0, y)
-            self._draw_line(line, y, color, width, x=number_width + 2)
+            self._draw_driver_row(row, y, color, width, include_delta=width >= 96)
 
         advance = min(max_rows, len(limited))
         self._leaderboard_index = (page_start + advance) % len(limited)
@@ -272,12 +415,26 @@ class NascarPlugin(BasePlugin):
         next_race = self._soonest_next_race()
         if next_race:
             label = self._series_label(next_race.get("series_id"))
-            logo_width = self._draw_event_logo(next_race, 0, 0, height)
-            text_x = logo_width + 3
+            logo = self._event_logo(next_race, height)
+            logo_width = int(getattr(logo, "width", 0))
+            lines = [
+                f"{label} NEXT",
+                str(next_race.get("race_name") or "Race"),
+                self._format_start(next_race.get("_start_utc") or next_race.get("race_date"))
+                or str(next_race.get("track_name") or ""),
+            ]
+            if height >= 64:
+                lines.append(str(next_race.get("track_name") or ""))
+            available = max(1, width - logo_width - (3 if logo_width else 0))
+            fitted_lines = [self._fit_text(line, available) for line in lines]
+            text_width = max((self._text_width(line) for line in fitted_lines), default=0)
+            total_width = logo_width + (3 if logo_width and text_width else 0) + text_width
+            block_x = max(0, (width - total_width) // 2)
+            self._paste_icon(logo, block_x, 0)
+            text_x = block_x + logo_width + (3 if logo_width else 0)
             self._draw_line(f"{label} NEXT", 0, accent, width, x=text_x)
             self._draw_line(str(next_race.get("race_name") or "Race"), self._row_y(1, height), primary, width, x=text_x)
-            when = self._format_start(next_race.get("_start_utc") or next_race.get("race_date"))
-            self._draw_line(when or str(next_race.get("track_name") or ""), self._row_y(2, height), muted, width, x=text_x)
+            self._draw_line(lines[2], self._row_y(2, height), muted, width, x=text_x)
             if height >= 64:
                 self._draw_line(str(next_race.get("track_name") or ""), self._row_y(3, height), muted, width, x=text_x)
             return
@@ -336,16 +493,41 @@ class NascarPlugin(BasePlugin):
                 return str(self.config.get(info["favorite_key"]) or "").strip()
         return ""
 
-    def _favorite_row(self) -> Optional[DriverRow]:
-        needle = self._favorite_driver().lower()
-        if not needle:
-            return None
-        for row in self._leaderboard_rows():
+    def _favorite_entries(self) -> List[List[str]]:
+        raw = self._favorite_driver()
+        entries: List[List[str]] = []
+        for item in raw.replace(";", ",").replace("\n", ",").split(","):
+            item = item.strip().lower()
+            if not item:
+                continue
+            aliases = [part.strip() for part in item.split(" - ", 1) if part.strip()]
+            entries.append(aliases or [item])
+        return entries
+
+    @staticmethod
+    def _row_matches(row: DriverRow, aliases: List[str]) -> bool:
+        for needle in aliases:
             if needle == row.number.lower() or needle == row.driver_id.lower():
-                return row
+                return True
             if needle in row.name.lower():
-                return row
-        return None
+                return True
+        return False
+
+    def _favorite_rows(self) -> List[DriverRow]:
+        rows = self._leaderboard_rows()
+        matches: List[DriverRow] = []
+        seen = set()
+        for aliases in self._favorite_entries():
+            match = next((row for row in rows if self._row_matches(row, aliases)), None)
+            identity = (match.driver_id or f"{match.number}:{match.name}") if match else ""
+            if match and identity not in seen:
+                matches.append(match)
+                seen.add(identity)
+        return matches
+
+    def _favorite_row(self) -> Optional[DriverRow]:
+        rows = self._favorite_rows()
+        return rows[0] if rows else None
 
     def _use_favorite_mode(self) -> bool:
         mode = str(self.config.get("display_mode", "auto")).lower()
@@ -364,6 +546,26 @@ class NascarPlugin(BasePlugin):
         vehicles = feed.get("vehicles") or []
         flag_state = self._int_or_none(feed.get("flag_state"))
         return bool(vehicles) and flag_state in self.ACTIVE_FLAGS
+
+    def _is_selected_final_feed(self, feed: Dict[str, Any]) -> bool:
+        if not isinstance(feed, dict):
+            return False
+        series_id = self._int_or_none(feed.get("series_id"))
+        if series_id not in self._enabled_series_ids():
+            return False
+        return bool(feed.get("vehicles") or []) and self._int_or_none(feed.get("flag_state")) == 4
+
+    def _sync_final_state(self) -> None:
+        race_key = ":".join(
+            str(self.live_feed.get(key) or "")
+            for key in ("series_id", "race_id", "run_id", "run_name", "laps_in_race")
+        )
+        if race_key != self._final_race_key:
+            self._final_race_key = race_key
+            self._final_started_at = time.monotonic()
+            self._final_favorite_index = 0
+        elif self._final_started_at is None:
+            self._final_started_at = time.monotonic()
 
     def _enabled_series_ids(self) -> List[int]:
         enabled = []
@@ -478,35 +680,113 @@ class NascarPlugin(BasePlugin):
         y: int,
         color: Tuple[int, int, int],
         width: int,
-        x: int = 0,
+        x: Optional[int] = None,
     ) -> None:
-        available = max(1, width - x)
+        available = width if x is None else max(1, width - x)
         fitted = self._fit_text(text, available)
+        if x is None:
+            x = max(0, (width - self._text_width(fitted)) // 2)
         self.display_manager.draw_text(fitted, x=x, y=max(0, int(y)), color=color, small_font=True)
+
+    def _flag_icon(self) -> Any:
+        state = self._int_or_none(self.live_feed.get("flag_state")) or 0
+        key = "flag_checkered" if state == 4 else f"flag_{state}"
+        return self._get_icon(key, lambda: self._make_flag_icon(state))
+
+    def _flag_color(self) -> Tuple[int, int, int]:
+        state = self._int_or_none(self.live_feed.get("flag_state")) or 0
+        return self.FLAG_COLORS.get(state, self._rgb("accent_color", (255, 215, 0)))
 
     def _draw_flag_icon(self, x: int, y: int) -> int:
         """Draw the current race flag from a persistent cached PNG."""
-        state = self._int_or_none(self.live_feed.get("flag_state")) or 0
-        icon = self._get_icon(f"flag_{state}", lambda: self._make_flag_icon(state))
-        return self._paste_icon(icon, x, y)
+        return self._paste_icon(self._flag_icon(), x, y)
+
+    def _draw_flag_header(
+        self,
+        text: str,
+        y: int,
+        color: Tuple[int, int, int],
+        width: int,
+    ) -> None:
+        icon = self._flag_icon()
+        icon_width = int(getattr(icon, "width", 0))
+        gap = 2 if icon_width else 0
+        fitted = self._fit_text(text, max(1, width - icon_width - gap))
+        text_width = self._text_width(fitted)
+        start_x = max(0, (width - icon_width - gap - text_width) // 2)
+        self._paste_icon(icon, start_x, y)
+        self.display_manager.draw_text(
+            fitted,
+            x=start_x + icon_width + gap,
+            y=max(0, int(y)),
+            color=color,
+            small_font=True,
+        )
+
+    def _number_icon(self, row: DriverRow) -> Any:
+        series_id = self._int_or_none(self.live_feed.get("series_id")) or 0
+        key = f"number_{series_id}_{row.number}"
+        return self._get_icon(key, lambda: self._make_number_icon(row.number, series_id))
 
     def _draw_number_icon(self, row: DriverRow, x: int, y: int) -> int:
         """Draw a compact car-number badge keyed to series and number."""
-        series_id = self._int_or_none(self.live_feed.get("series_id")) or 0
-        key = f"number_{series_id}_{row.number}"
-        icon = self._get_icon(key, lambda: self._make_number_icon(row.number, series_id))
-        return self._paste_icon(icon, x, y)
+        return self._paste_icon(self._number_icon(row), x, y)
 
-    def _draw_event_logo(self, race: Dict[str, Any], x: int, y: int, height: int) -> int:
-        """Draw and cache an upcoming event logo or a generated event badge."""
+    def _draw_driver_row(
+        self,
+        row: DriverRow,
+        y: int,
+        color: Tuple[int, int, int],
+        width: int,
+        include_delta: bool,
+    ) -> None:
+        """Draw a centered ``position, number badge, driver`` row."""
+        position = f"P{row.position}"
+        name = self._short_name(row.name)
+        if include_delta and self.config.get("show_delta", True) and row.delta not in (None, 0):
+            name = f"{name} +{row.delta:.1f}"
+
+        icon = self._number_icon(row)
+        icon_width = int(getattr(icon, "width", 0))
+        position_width = self._text_width(position)
+        first_gap = 2
+        second_gap = 2 if icon_width else 0
+        fixed_width = position_width + first_gap + icon_width + second_gap
+        fitted_name = self._fit_text(name, max(1, width - fixed_width))
+        name_width = self._text_width(fitted_name)
+        total_width = fixed_width + name_width
+        start_x = max(0, (width - total_width) // 2)
+
+        self.display_manager.draw_text(
+            position,
+            x=start_x,
+            y=max(0, int(y)),
+            color=color,
+            small_font=True,
+        )
+        icon_x = start_x + position_width + first_gap
+        self._paste_icon(icon, icon_x, y)
+        self.display_manager.draw_text(
+            fitted_name,
+            x=icon_x + icon_width + second_gap,
+            y=max(0, int(y)),
+            color=color,
+            small_font=True,
+        )
+
+    def _event_logo(self, race: Dict[str, Any], height: int) -> Any:
+        """Load a cached upcoming event logo or generated event badge."""
         series_id = self._int_or_none(race.get("series_id")) or 0
         race_id = str(race.get("race_id") or race.get("race_name") or "event")
         size = 30 if height >= 64 else 22
         identity = f"{series_id}:{race_id}:{self._event_logo_url(race) or 'generated'}:{size}"
         digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
         key = f"event_logo_{digest}"
-        icon = self._get_icon(key, lambda: self._load_event_logo(race, size))
-        return self._paste_icon(icon, x, y)
+        return self._get_icon(key, lambda: self._load_event_logo(race, size))
+
+    def _draw_event_logo(self, race: Dict[str, Any], x: int, y: int, height: int) -> int:
+        """Draw and cache an upcoming event logo or generated event badge."""
+        return self._paste_icon(self._event_logo(race, height), x, y)
 
     def _event_logo_url(self, race: Dict[str, Any]) -> str:
         template = str(self.config.get("event_logo_url_template") or "").strip()
@@ -617,7 +897,13 @@ class NascarPlugin(BasePlugin):
         icon = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
         draw = ImageDraw.Draw(icon)
         draw.rectangle((1, 1, 2, 7), fill=(255, 255, 255, 255))
-        draw.polygon(((3, 1), (7, 2), (3, 4)), fill=color)
+        if state == 4:
+            for y in range(1, 6):
+                for x in range(3, 8):
+                    square = (255, 255, 255, 255) if (x + y) % 2 else (0, 0, 0, 255)
+                    draw.point((x, y), fill=square)
+        else:
+            draw.polygon(((3, 1), (7, 2), (3, 4)), fill=color)
         draw.rectangle((0, 7, 4, 7), fill=(255, 255, 255, 255))
         return icon
 
@@ -643,14 +929,14 @@ class NascarPlugin(BasePlugin):
     def _paste_icon(self, icon: Any, x: int, y: int) -> int:
         if icon is None:
             return 0
+        width = int(icon.width)
         canvas = getattr(self.display_manager, "image", None)
         if canvas is not None and hasattr(canvas, "paste"):
             try:
                 canvas.paste(icon, (int(x), int(y)), icon)
-                return int(icon.width)
             except Exception:  # noqa: BLE001 - text fallback keeps older cores working
                 self.logger.debug("Could not draw NASCAR icon", exc_info=True)
-        return 0
+        return width
 
     def _fit_text(self, text: str, width: int) -> str:
         text = " ".join(str(text).split())
@@ -694,7 +980,8 @@ class NascarPlugin(BasePlugin):
         return self.FLAG_LABELS.get(flag, "LIVE")
 
     def _short_name(self, name: str) -> str:
-        parts = [part for part in str(name).replace(".", "").split() if part]
+        clean_name = re.sub(r"\s*\(C\)\s*", " ", str(name), flags=re.IGNORECASE).strip()
+        parts = [part for part in clean_name.replace(".", "").split() if part]
         if not parts:
             return "Driver"
         if len(parts) == 1:

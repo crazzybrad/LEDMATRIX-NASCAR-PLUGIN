@@ -2,6 +2,8 @@
 
 Live NASCAR race status plugin for [ChuckBuilds/LEDMatrix](https://github.com/ChuckBuilds/LEDMatrix).
 
+Author: Crazzybrad
+
 It uses NASCAR's public, unauthenticated timing data to show:
 
 - Cup Series, NASCAR O'Reilly Auto Parts Series, and Craftsman Truck Series
@@ -9,12 +11,13 @@ It uses NASCAR's public, unauthenticated timing data to show:
 - Separate favorite drivers for each series by car number, driver id, or name
 - Rotating leaderboard positions when no favorite is selected
 - Next selected NASCAR race when no selected series is live
-- Cached green, yellow, red, and car-number badge icons
+- Flag-colored live headers with cached green, yellow, red, and checkered icons
 - Cached upcoming event logos with generated series badges as a fallback
+- A race-final sequence that shows the winner for 15 seconds, then favorite-driver finishing positions
 
 ## Install
 
-From the LEDMatrix web interface, open **Plugins**, then install from a custom GitHub URL
+From the LEDMatrix web interface, open **Plugins**, then install from a custom GitHub URL once this folder is published as its own repo.
 
 For local development against an LEDMatrix checkout:
 
@@ -38,9 +41,20 @@ The generated plugin tab exposes:
 - Leaderboard size and text colors
 - Optional `event_logo_url_template` for a race logo service or hosted image
 
-Each favorite accepts a car/truck number, NASCAR driver id, or driver name fragment.
+Each favorite accepts comma-separated car/truck numbers, NASCAR driver ids, or
+driver name fragments. For example, O'Reilly favorites Jesse Love and Austin
+Hill can be entered as `2, 21` or `2 - J. Love, 21 - A. Hill`. The combined
+labels are accepted, but entering just the numbers is simplest.
 Only the active series' favorite is used, so overlapping numbers stay separate.
 In `auto` mode, a series with no favorite configured shows the leaderboard.
+Favorite mode centers the selected driver's position, number badge, and name on
+the middle row. The bottom row rotates through the remaining field as compact
+position and car-number pairs. NASCAR's `(C)` Chase marker is omitted from the
+displayed driver name.
+During a live race, the series and lap header uses the current flag color along
+with its matching flag icon. At the finish, the plugin shows a checkered flag,
+the winning car number and driver for 15 seconds, then the configured favorites'
+final positions for the remainder of the display cycle.
 When upgrading from the single `favorite_driver` setting, enter your favorites
 in the new series fields; the old shared setting is no longer used.
 
