@@ -1,7 +1,7 @@
 {
   "id": "ledmatrix-nascar",
   "name": "NASCAR Race Leaderboard",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Shows live NASCAR lap status, favorite driver position, and leaderboard pages for Cup, O'Reilly, and Truck Series races.",
   "author": "Crazzybrad",
   "entry_point": "manager.py",

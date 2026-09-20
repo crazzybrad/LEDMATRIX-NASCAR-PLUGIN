@@ -42,6 +42,7 @@ class DriverRow:
 class NascarPlugin(BasePlugin):
     """Render live NASCAR lap and leaderboard data on the LED matrix."""
 
+    DEFAULT_LIVE_FEED_URL = "https://cf.nascar.com/live/feeds/live-feed.json"
     FINAL_WINNER_SECONDS = 15.0
 
     SERIES = {
@@ -120,17 +121,16 @@ class NascarPlugin(BasePlugin):
 
         self.last_error = None
         mock_feed = self.config.get("mock_live_feed")
-        if isinstance(mock_feed, dict):
+        if isinstance(mock_feed, dict) and mock_feed:
             self.live_feed = mock_feed
         else:
             try:
-                feed = self._fetch_json(self.config.get(
-                    "live_feed_url",
-                    "https://cf.nascar.com/live/feeds/live-feed.json",
-                ))
-                if isinstance(feed, dict):
-                    self.live_feed = feed
-                    self._cache_set("live_feed", feed)
+                live_feed_url = str(self.config.get("live_feed_url") or self.DEFAULT_LIVE_FEED_URL).strip()
+                feed = self._fetch_json(live_feed_url)
+                if not isinstance(feed, dict):
+                    raise ValueError("NASCAR live feed did not return a JSON object")
+                self.live_feed = feed
+                self._cache_set("live_feed", feed)
             except Exception as exc:  # noqa: BLE001 - update must not kill display rotation
                 self.last_error = str(exc)
                 cached = self._cache_get("live_feed", max_age=180)
@@ -412,6 +412,12 @@ class NascarPlugin(BasePlugin):
         accent = self._rgb("accent_color", (255, 215, 0))
         muted = self._rgb("muted_color", (110, 110, 110))
 
+        if self.last_error:
+            self._draw_line("NASCAR", 0, accent, width)
+            self._draw_line("LIVE FEED ERROR", self._row_y(1, height), primary, width)
+            self._draw_line("CHECK CONNECTION", self._row_y(2, height), muted, width)
+            return
+
         next_race = self._soonest_next_race()
         if next_race:
             label = self._series_label(next_race.get("series_id"))
@@ -437,11 +443,6 @@ class NascarPlugin(BasePlugin):
             self._draw_line(lines[2], self._row_y(2, height), muted, width, x=text_x)
             if height >= 64:
                 self._draw_line(str(next_race.get("track_name") or ""), self._row_y(3, height), muted, width, x=text_x)
-            return
-
-        if self.last_error:
-            self._draw_line("NASCAR", 0, accent, width)
-            self._draw_line("FEED ERROR", self._row_y(1, height), primary, width)
             return
 
         self._draw_line("NASCAR", 0, accent, width)
@@ -640,10 +641,11 @@ class NascarPlugin(BasePlugin):
         return self._parse_datetime(race.get("race_date"))
 
     def _soonest_next_race(self) -> Optional[Dict[str, Any]]:
+        now = datetime.now(timezone.utc)
         candidates = []
         for race in self.next_races.values():
             start = self._parse_datetime(race.get("_start_utc") or race.get("race_date"))
-            if start:
+            if start and start >= now:
                 candidates.append((start, race))
         if not candidates:
             return None

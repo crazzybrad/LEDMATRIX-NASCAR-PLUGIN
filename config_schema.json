@@ -94,7 +94,7 @@
     "live_feed_url": {
       "type": "string",
       "default": "https://cf.nascar.com/live/feeds/live-feed.json",
-      "description": "NASCAR live feed URL."
+      "description": "NASCAR live feed URL. Leave blank to use the default NASCAR endpoint."
     },
     "event_logo_url_template": {
       "type": "string",

@@ -73,3 +73,7 @@ uses a cached Cup, O'Reilly, or Truck event badge when no image URL is present.
   - O'Reilly and Trucks: `https://cf.nascar.com/cacher/{year}/race_list_basic.json`
 
 NASCAR currently identifies national series as Cup `1`, O'Reilly `2`, and Trucks `3`.
+
+If the live endpoint cannot be reached, the matrix shows `LIVE FEED ERROR`
+instead of presenting a stale scheduled race as upcoming. Leaving
+`live_feed_url` blank safely restores the default NASCAR endpoint.
